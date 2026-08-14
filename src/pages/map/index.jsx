@@ -385,8 +385,8 @@ function Map() {
     const { data: quests } = useQuestsData();
     const { data: handbook } = useHandbookData();
     const { itemsById, itemOrderById } = useMemo(() => {
-        const indexedItems = new Map();
-        const indexedItemOrder = new Map();
+        const indexedItems = new globalThis.Map();
+        const indexedItemOrder = new globalThis.Map();
         items.forEach((item, index) => {
             indexedItems.set(item.id, item);
             indexedItemOrder.set(item.id, index);
@@ -397,7 +397,7 @@ function Map() {
         };
     }, [items]);
     const handbookCategoriesById = useMemo(
-        () => new Map(handbook.handbookCategories.map((category) => [category.id, category])),
+        () => new globalThis.Map(handbook.handbookCategories.map((category) => [category.id, category])),
         [handbook.handbookCategories],
     );
 
