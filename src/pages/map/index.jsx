@@ -278,7 +278,7 @@ function addElevation(item, popup) {
     }
 }
 
-function Map() {
+function TarkovMap() {
     let { currentMap } = useParams();
     const [searchParams] = useSearchParams();
 
@@ -384,20 +384,12 @@ function Map() {
     const { data: items } = useItemsData();
     const { data: quests } = useQuestsData();
     const { data: handbook } = useHandbookData();
-    const { itemsById, itemOrderById } = useMemo(() => {
-        const indexedItems = new globalThis.Map();
-        const indexedItemOrder = new globalThis.Map();
-        items.forEach((item, index) => {
-            indexedItems.set(item.id, item);
-            indexedItemOrder.set(item.id, index);
-        });
-        return {
-            itemsById: indexedItems,
-            itemOrderById: indexedItemOrder,
-        };
-    }, [items]);
+    const indexedItemsById = useMemo(
+        () => new Map(items.map((item, order) => [item.id, { item, order }])),
+        [items],
+    );
     const handbookCategoriesById = useMemo(
-        () => new globalThis.Map(handbook.handbookCategories.map((category) => [category.id, category])),
+        () => new Map(handbook.handbookCategories.map((category) => [category.id, category])),
         [handbook.handbookCategories],
     );
 
@@ -1987,7 +1979,7 @@ function Map() {
         if (mapData.locks.length > 0) {
             const locks = L.layerGroup();
             for (const lock of mapData.locks) {
-                const key = itemsById.get(lock.key.id);
+                const key = indexedItemsById.get(lock.key.id)?.item;
                 if (!key) {
                     continue;
                 }
@@ -2053,9 +2045,10 @@ function Map() {
                     continue;
                 }
                 const lootItems = [...new Set(looseLoot.items.map((lootItem) => lootItem.id))]
-                    .map((itemId) => itemsById.get(itemId))
+                    .map((itemId) => indexedItemsById.get(itemId))
                     .filter(Boolean)
-                    .sort((left, right) => itemOrderById.get(left.id) - itemOrderById.get(right.id));
+                    .sort((left, right) => left.order - right.order)
+                    .map(({ item }) => item);
                 if (lootItems.length === 0) {
                     continue;
                 }
@@ -2159,7 +2152,7 @@ function Map() {
             }
         }
         refreshMapSearch();
-    }, [mapData, itemsById, itemOrderById, handbookCategoriesById, addLayer, t, tMaps, getPoiLinkElement]);
+    }, [mapData, indexedItemsById, handbookCategoriesById, addLayer, t, tMaps, getPoiLinkElement]);
 
     useEffect(() => {
         if (!mapData || mapData.projection !== "interactive") {
@@ -2274,4 +2267,4 @@ function Map() {
         </div>,
     ];
 }
-export default Map;
+export default TarkovMap;
