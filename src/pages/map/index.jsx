@@ -41,6 +41,29 @@ const showTestPlayerMarker = false;
 const showElevation = false;
 const svgFromGit = false;
 
+const defaultIconSize = [24, 24];
+const defaultPopupAnchor = [0, -12];
+const iconCache = new Map();
+
+function getMapIcon(iconUrl, className = "", iconSize = defaultIconSize, iconAnchor, popupAnchor = defaultPopupAnchor) {
+    const cacheKey = `${iconUrl}\0${className}\0${iconSize.join(",")}\0${iconAnchor?.join(",") ?? ""}\0${popupAnchor.join(",")}`;
+    let icon = iconCache.get(cacheKey);
+    if (!icon) {
+        const options = {
+            iconUrl,
+            iconSize,
+            popupAnchor,
+            className,
+        };
+        if (iconAnchor) {
+            options.iconAnchor = iconAnchor;
+        }
+        icon = L.icon(options);
+        iconCache.set(cacheKey, icon);
+    }
+    return icon;
+}
+
 function getCRS(mapData) {
     let scaleX = 1;
     let scaleY = 1;
@@ -384,10 +407,7 @@ function TarkovMap() {
     const { data: items } = useItemsData();
     const { data: quests } = useQuestsData();
     const { data: handbook } = useHandbookData();
-    const indexedItemsById = useMemo(
-        () => new Map(items.map((item, order) => [item.id, { item, order }])),
-        [items],
-    );
+    const indexedItemsById = useMemo(() => new Map(items.map((item, order) => [item.id, { item, order }])), [items]);
     const handbookCategoriesById = useMemo(
         () => new Map(handbook.handbookCategories.map((category) => [category.id, category])),
         [handbook.handbookCategories],
@@ -1152,12 +1172,7 @@ function TarkovMap() {
 
                 const items = staticMapMarkers[mapData.normalizedName][category];
                 for (const item of items) {
-                    const itemIcon = L.icon({
-                        iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/${category}.png`,
-                        iconSize: [24, 24],
-                        popupAnchor: [0, -12],
-                        //className: layerIncludesMarker(heightLayer, item) ? '' : 'off-level',
-                    });
+                    const itemIcon = getMapIcon(`${process.env.PUBLIC_URL}/maps/interactive/${category}.png`);
                     L.marker(pos(item.position), { icon: itemIcon, position: item.position })
                         .bindPopup(L.popup().setContent(`${item.name}<br>Elevation: ${item.position.y}`))
                         .addTo(markerLayer);
@@ -1313,12 +1328,10 @@ function TarkovMap() {
                     continue;
                 }
 
-                const spawnIcon = L.icon({
-                    iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/spawn_${spawnType}.png`,
-                    iconSize: [24, 24],
-                    popupAnchor: [0, -12],
-                    className: markerClass,
-                });
+                const spawnIcon = getMapIcon(
+                    `${process.env.PUBLIC_URL}/maps/interactive/spawn_${spawnType}.png`,
+                    markerClass,
+                );
 
                 if (spawnType === "pmc") {
                     spawnIcon.iconAnchor = [12, 24];
@@ -1515,11 +1528,9 @@ function TarkovMap() {
                 if (!positionIsInBounds(containerPosition.position)) {
                     continue;
                 }
-                const containerIcon = L.icon({
-                    iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/${images[`container_${containerPosition.lootContainer.normalizedName}`]}.png`,
-                    iconSize: [24, 24],
-                    popupAnchor: [0, -12],
-                });
+                const containerIcon = getMapIcon(
+                    `${process.env.PUBLIC_URL}/maps/interactive/${images[`container_${containerPosition.lootContainer.normalizedName}`]}.png`,
+                );
 
                 const containerMarker = L.marker(pos(containerPosition.position), {
                     icon: containerIcon,
@@ -1556,11 +1567,7 @@ function TarkovMap() {
                 if (!positionIsInBounds(sw.position)) {
                     continue;
                 }
-                const switchIcon = L.icon({
-                    iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/switch.png`,
-                    iconSize: [24, 24],
-                    popupAnchor: [0, -12],
-                });
+                const switchIcon = getMapIcon(`${process.env.PUBLIC_URL}/maps/interactive/switch.png`);
                 const switchMarker = L.marker(pos(sw.position), {
                     icon: switchIcon,
                     position: sw.position,
@@ -1637,11 +1644,7 @@ function TarkovMap() {
                 if (!positionIsInBounds(weaponPosition.position)) {
                     continue;
                 }
-                const weaponIcon = L.icon({
-                    iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/stationarygun.png`,
-                    iconSize: [24, 24],
-                    popupAnchor: [0, -12],
-                });
+                const weaponIcon = getMapIcon(`${process.env.PUBLIC_URL}/maps/interactive/stationarygun.png`);
 
                 const weaponMarker = L.marker(pos(weaponPosition.position), {
                     icon: weaponIcon,
@@ -1674,11 +1677,7 @@ function TarkovMap() {
                     weight: 1,
                     className: "not-shown",
                 });
-                const hazardIcon = L.icon({
-                    iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/hazard.png`,
-                    iconSize: [24, 24],
-                    popupAnchor: [0, -12],
-                });
+                const hazardIcon = getMapIcon(`${process.env.PUBLIC_URL}/maps/interactive/hazard.png`);
 
                 const hazardMarker = L.marker(pos(hazard.position), {
                     icon: hazardIcon,
@@ -1719,11 +1718,7 @@ function TarkovMap() {
                         weight: 1,
                         className: "not-shown",
                     });
-                    const hazardIcon = L.icon({
-                        iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/hazard_mortar.png`,
-                        iconSize: [24, 24],
-                        popupAnchor: [0, -12],
-                    });
+                    const hazardIcon = getMapIcon(`${process.env.PUBLIC_URL}/maps/interactive/hazard_mortar.png`);
 
                     const artyName = t("Mortar");
 
@@ -1857,12 +1852,10 @@ function TarkovMap() {
                                 continue;
                             }
                             questSet.add(quest);
-                            const questItemIcon = L.icon({
-                                iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/quest_item.png`,
-                                iconSize: [24, 24],
-                                popupAnchor: [0, -12],
-                                className: getMarkerClass(quest, obj),
-                            });
+                            const questItemIcon = getMapIcon(
+                                `${process.env.PUBLIC_URL}/maps/interactive/quest_item.png`,
+                                getMarkerClass(quest, obj),
+                            );
                             const questItemMarker = L.marker(pos(position), {
                                 icon: questItemIcon,
                                 position: position,
@@ -1902,12 +1895,10 @@ function TarkovMap() {
                             weight: 1,
                             className: "not-shown",
                         });
-                        const zoneIcon = L.icon({
-                            iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/quest_objective.png`,
-                            iconSize: [24, 24],
-                            popupAnchor: [0, -12],
-                            className: getMarkerClass(quest, obj),
-                        });
+                        const zoneIcon = getMapIcon(
+                            `${process.env.PUBLIC_URL}/maps/interactive/quest_objective.png`,
+                            getMarkerClass(quest, obj),
+                        );
 
                         const zoneMarker = L.marker(pos(zone.position), {
                             icon: zoneIcon,
@@ -1989,11 +1980,7 @@ function TarkovMap() {
                 }
 
                 checkMarkerBounds(lock.position, markerBoundsRef.current);
-                const lockIcon = L.icon({
-                    iconUrl: `${process.env.PUBLIC_URL}/maps/interactive/lock.png`,
-                    iconSize: [24, 24],
-                    popupAnchor: [0, -12],
-                });
+                const lockIcon = getMapIcon(`${process.env.PUBLIC_URL}/maps/interactive/lock.png`);
                 var lockTypeText;
                 if (lock.lockType === "door") {
                     lockTypeText = tMaps("Door");
@@ -2083,12 +2070,7 @@ function TarkovMap() {
                     markerTitle = category.name;
                     //className = 'loot-outline';
                 }
-                const lootIcon = new L.Icon({
-                    iconUrl,
-                    iconSize,
-                    popupAnchor: [0, -12],
-                    className,
-                });
+                const lootIcon = getMapIcon(iconUrl, className, iconSize);
 
                 const lootMarker = L.marker(pos(looseLoot.position), {
                     icon: lootIcon,
