@@ -384,6 +384,22 @@ function Map() {
     const { data: items } = useItemsData();
     const { data: quests } = useQuestsData();
     const { data: handbook } = useHandbookData();
+    const { itemsById, itemOrderById } = useMemo(() => {
+        const indexedItems = new Map();
+        const indexedItemOrder = new Map();
+        items.forEach((item, index) => {
+            indexedItems.set(item.id, item);
+            indexedItemOrder.set(item.id, index);
+        });
+        return {
+            itemsById: indexedItems,
+            itemOrderById: indexedItemOrder,
+        };
+    }, [items]);
+    const handbookCategoriesById = useMemo(
+        () => new Map(handbook.handbookCategories.map((category) => [category.id, category])),
+        [handbook.handbookCategories],
+    );
 
     let allMaps = useMapImages();
 
@@ -1971,7 +1987,7 @@ function Map() {
         if (mapData.locks.length > 0) {
             const locks = L.layerGroup();
             for (const lock of mapData.locks) {
-                const key = items.find((i) => i.id === lock.key.id);
+                const key = itemsById.get(lock.key.id);
                 if (!key) {
                     continue;
                 }
@@ -2036,7 +2052,10 @@ function Map() {
                 if (!positionIsInBounds(looseLoot.position)) {
                     continue;
                 }
-                const lootItems = items.filter((item) => looseLoot.items.some((lootItem) => item.id === lootItem.id));
+                const lootItems = [...new Set(looseLoot.items.map((lootItem) => lootItem.id))]
+                    .map((itemId) => itemsById.get(itemId))
+                    .filter(Boolean)
+                    .sort((left, right) => itemOrderById.get(left.id) - itemOrderById.get(right.id));
                 if (lootItems.length === 0) {
                     continue;
                 }
@@ -2045,7 +2064,7 @@ function Map() {
                 let markerTitle = t("Loose Loot");
                 let className = "";
                 const markerCategories = lootItems.reduce((markerCategories, item) => {
-                    const category = handbook.handbookCategories.find((c) => c.id === item.handbookCategories[0]?.id);
+                    const category = handbookCategoriesById.get(item.handbookCategories[0]?.id);
                     if (category) {
                         markerCategories.add(category);
                     }
@@ -2066,9 +2085,7 @@ function Map() {
                         iconSize = [pixelWidth * scale, 24];
                     }
                 } else if (markerCategories.size === 1) {
-                    const category = handbook.handbookCategories.find(
-                        (c) => c.id === markerCategories.values().next().value.id,
-                    );
+                    const category = handbookCategoriesById.get(markerCategories.values().next().value.id);
                     iconUrl = category.imageLink;
                     markerTitle = category.name;
                     //className = 'loot-outline';
@@ -2102,9 +2119,7 @@ function Map() {
                         lootLink.append(`${lootItem.name}`);
                     }
                     popupContent.append(lootLink);
-                    const category = handbook.handbookCategories.find(
-                        (c) => c.id === lootItem.handbookCategories[0]?.id,
-                    );
+                    const category = handbookCategoriesById.get(lootItem.handbookCategories[0]?.id);
                     if (!category) {
                         continue;
                     }
@@ -2144,7 +2159,7 @@ function Map() {
             }
         }
         refreshMapSearch();
-    }, [mapData, items, handbook, addLayer, t, tMaps, getPoiLinkElement]);
+    }, [mapData, itemsById, itemOrderById, handbookCategoriesById, addLayer, t, tMaps, getPoiLinkElement]);
 
     useEffect(() => {
         if (!mapData || mapData.projection !== "interactive") {
