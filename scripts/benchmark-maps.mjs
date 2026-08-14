@@ -16,10 +16,13 @@ const defaults = {
     settleMs: 750,
     timeoutMs: 120_000,
     warmups: 2,
+    zoomIterations: 15,
+    zoomSampleMs: 700,
 };
 
 const layerGroups = ["Loose Loot", "Lootable Items", "Tasks"];
 const layerBlockSize = 5;
+const zoomBlockSize = 3;
 const loadMetricKeys = ["mapReadyMs", "markerRenderMs", "longTaskTotalMs", "domNodes", "markerCount"];
 
 function parseArgs(argv) {
@@ -39,6 +42,8 @@ function parseArgs(argv) {
         "--settle-ms": "settleMs",
         "--timeout-ms": "timeoutMs",
         "--warmups": "warmups",
+        "--zoom-iterations": "zoomIterations",
+        "--zoom-sample-ms": "zoomSampleMs",
     };
     const numericOptions = new Set([
         "cpuThrottle",
@@ -47,6 +52,8 @@ function parseArgs(argv) {
         "settleMs",
         "timeoutMs",
         "warmups",
+        "zoomIterations",
+        "zoomSampleMs",
     ]);
 
     for (let index = 0; index < argv.length; index += 2) {
@@ -375,6 +382,51 @@ async function measureLayerToggle(page, group) {
     }, group);
 }
 
+async function measureZoom(page, direction, sampleMs) {
+    await page.bringToFront();
+    return page.evaluate(
+        async ({ direction, sampleMs }) => {
+            const selector = direction === "in" ? ".leaflet-control-zoom-in" : ".leaflet-control-zoom-out";
+            const button = document.querySelector(selector);
+            if (!button) {
+                throw new Error(`Zoom control not found: ${selector}`);
+            }
+
+            const benchmark = window.__mapBenchmark;
+            const startedAt = performance.now();
+            const frameTimes = [];
+            let frameRequest;
+            const collectFrame = (time) => {
+                frameTimes.push(time);
+                if (time - startedAt < sampleMs) {
+                    frameRequest = requestAnimationFrame(collectFrame);
+                }
+            };
+            frameRequest = requestAnimationFrame(collectFrame);
+            button.click();
+            await new Promise((resolve) => setTimeout(resolve, sampleMs));
+            cancelAnimationFrame(frameRequest);
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+            const completedAt = performance.now();
+            const longTasks = benchmark.longTasks
+                .filter((entry) => entry.startTime >= startedAt && entry.startTime <= completedAt)
+                .map((entry) => entry.duration);
+            const frameGaps = frameTimes.map((time, index) =>
+                index === 0 ? time - startedAt : time - frameTimes[index - 1],
+            );
+            return {
+                direction,
+                frameCount: frameTimes.length,
+                longTaskTotalMs: longTasks.reduce((total, duration) => total + duration, 0),
+                maxFrameGapMs: Math.max(0, ...frameGaps),
+                maxLongTaskMs: Math.max(0, ...longTasks),
+            };
+        },
+        { direction, sampleMs },
+    );
+}
+
 function percentile(values, percentileValue) {
     if (values.length === 0) {
         return 0;
@@ -490,6 +542,22 @@ async function main() {
             }
         }
 
+        const zooms = {
+            base: { in: [], out: [] },
+            head: { in: [], out: [] },
+        };
+        for (let blockStart = 0; blockStart < options.zoomIterations; blockStart += zoomBlockSize) {
+            const blockIndex = blockStart / zoomBlockSize;
+            const blockLength = Math.min(zoomBlockSize, options.zoomIterations - blockStart);
+            for (const version of alternatingOrder(blockIndex)) {
+                await measureLoad(page, versions[version].url, options);
+                for (let index = 0; index < blockLength; index += 1) {
+                    zooms[version].in.push(await measureZoom(page, "in", options.zoomSampleMs));
+                    zooms[version].out.push(await measureZoom(page, "out", options.zoomSampleMs));
+                }
+            }
+        }
+
         const result = {
             diagnosticFirstLoads,
             generatedAt: new Date().toISOString(),
@@ -503,12 +571,16 @@ async function main() {
                 layerIterations: options.layerIterations,
                 settleMs: options.settleMs,
                 warmups: options.warmups,
+                zoomBlockSize,
+                zoomIterations: options.zoomIterations,
+                zoomSampleMs: options.zoomSampleMs,
             },
             warmLoadSummary: {
                 base: summarizeLoads(warmLoads.base),
                 head: summarizeLoads(warmLoads.head),
             },
             warmLoads,
+            zooms,
         };
         await writeFile(options.output, `${JSON.stringify(result, null, 2)}\n`);
         console.log(JSON.stringify(result, null, 2));
