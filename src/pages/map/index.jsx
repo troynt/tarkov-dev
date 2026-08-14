@@ -115,13 +115,22 @@ function pos(position) {
     return [position.z, position.x];
 }
 
+function getRepresentativeClusterMarker(cluster) {
+    let currentCluster = cluster;
+    while (currentCluster._childClusters.length > 0) {
+        currentCluster = currentCluster._childClusters[currentCluster._childClusters.length - 1];
+    }
+    return currentCluster._markers[currentCluster._markers.length - 1];
+}
+
 function createClusteredMarkerLayer() {
     return L.markerClusterGroup({
+        animate: false,
         maxClusterRadius: 28,
         showCoverageOnHover: false,
         spiderfyOnMaxZoom: true,
         iconCreateFunction: (cluster) => {
-            const markerIcon = cluster.getAllChildMarkers()[0].options.icon.options;
+            const markerIcon = getRepresentativeClusterMarker(cluster).options.icon.options;
             const iconHtml = markerIcon.iconUrl ? `<img src="${markerIcon.iconUrl}" alt="" />` : markerIcon.html;
 
             return L.divIcon({
@@ -463,6 +472,7 @@ function TarkovMap() {
             zoomSnap: 0.1,
             scrollWheelZoom: true,
             wheelPxPerZoomLevel: 120,
+            markerZoomAnimation: false,
             attributionControl: false,
             crs: L.CRS.Simple,
             maxBounds: [
