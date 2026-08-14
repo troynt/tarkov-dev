@@ -67,6 +67,28 @@ L.Control.MapSearch = L.Control.extend({
             allMarkers: [],
         };
 
+        const getClusterGroups = () => {
+            const controlledLayers = map.layerControl?._layers.map(({ layer }) => layer) ?? [];
+            const groups = [...controlledLayers, ...Object.values(map._layers)].filter(
+                (layer) => typeof layer.getVisibleParent === "function",
+            );
+            return [...new Set(groups)];
+        };
+
+        const getClusterMarkers = (clusterGroup) => {
+            clusterGroup.searchMarkers ??= clusterGroup.getLayers();
+            return clusterGroup.searchMarkers;
+        };
+
+        const restoreClusterMarkers = () => {
+            for (const clusterGroup of getClusterGroups()) {
+                const missingMarkers = getClusterMarkers(clusterGroup).filter(
+                    (marker) => !clusterGroup.hasLayer(marker),
+                );
+                clusterGroup.addLayers(missingMarkers);
+            }
+        };
+
         resetSearch.addEventListener("click", () => {
             searchBar.value = "";
             searchBar.dispatchEvent(new Event("input"));
@@ -90,6 +112,8 @@ L.Control.MapSearch = L.Control.extend({
                     .filter((term) => term.length > 0);
 
                 if (searchTerms.length === 0) {
+                    restoreClusterMarkers();
+
                     // Reset markers if no valid search terms are provided
                     markers.allMarkers.forEach((marker) => {
                         if ("getElement" in marker && !("_bounds" in marker)) {
@@ -105,7 +129,16 @@ L.Control.MapSearch = L.Control.extend({
                 }
 
                 // Reassign all markers to prevent layer toggles leading to bugs while toggling layers after a search
-                markers.allMarkers = Object.values(map._targets);
+                const clusterGroups = getClusterGroups();
+                const clusterMarkers = clusterGroups.flatMap(getClusterMarkers);
+                markers.allMarkers = [
+                    ...new Set([
+                        ...Object.values(map._targets).filter(
+                            (marker) => typeof marker.getAllChildMarkers !== "function",
+                        ),
+                        ...clusterMarkers,
+                    ]),
+                ];
 
                 // #region Quest Searching
                 const foundQuest = this.options.quests.filter((quest) =>
@@ -130,15 +163,17 @@ L.Control.MapSearch = L.Control.extend({
 
                 markers.objectiveMarkers.forEach((marker) => {
                     if ("getElement" in marker) {
-                        marker.getElement().classList.add("pulse");
-                        marker.getElement().classList.remove("not-shown");
+                        const element = marker.getElement();
+                        element?.classList.add("pulse");
+                        element?.classList.remove("not-shown");
                     }
                 });
 
                 markers.nonObjectiveMarkers.forEach((marker) => {
                     if ("getElement" in marker) {
-                        marker.getElement().classList.add("not-shown");
-                        marker.getElement().classList.remove("pulse");
+                        const element = marker.getElement();
+                        element?.classList.add("not-shown");
+                        element?.classList.remove("pulse");
                     }
                 });
                 // #endregion
@@ -157,10 +192,23 @@ L.Control.MapSearch = L.Control.extend({
 
                 markers.itemAndContainerMarkers.forEach((marker) => {
                     if ("getElement" in marker) {
-                        marker.getElement().classList.add("pulse");
-                        marker.getElement().classList.remove("not-shown");
+                        const element = marker.getElement();
+                        element?.classList.add("pulse");
+                        element?.classList.remove("not-shown");
                     }
                 });
+
+                const matchingMarkers = new Set([
+                    ...markers.objectiveMarkers,
+                    ...markers.itemAndContainerMarkers,
+                ]);
+                for (const clusterGroup of clusterGroups) {
+                    const filteredMarkers = getClusterMarkers(clusterGroup).filter((marker) =>
+                        matchingMarkers.has(marker),
+                    );
+                    clusterGroup.clearLayers();
+                    clusterGroup.addLayers(filteredMarkers);
+                }
                 // #endregion
             }, 300),
         );
