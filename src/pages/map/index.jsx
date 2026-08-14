@@ -16,6 +16,7 @@ import "../../modules/leaflet-control-groupedlayer.js";
 import "../../modules/leaflet-control-raid-info.js";
 import "../../modules/leaflet-control-map-search.js";
 import "../../modules/leaflet-control-map-settings.js";
+import { chunkedLayerGroup, whenMarkerInsertionIdle } from "../../modules/leaflet-chunked-layer-group.js";
 import "../../styles/mapSettings.css";
 
 import { setPlayerPosition } from "../../features/settings/settingsSlice.mjs";
@@ -114,16 +115,23 @@ function pos(position) {
     return [position.z, position.x];
 }
 
+function getRepresentativeClusterMarker(cluster) {
+    let currentCluster = cluster;
+    while (currentCluster._childClusters.length > 0) {
+        currentCluster = currentCluster._childClusters[currentCluster._childClusters.length - 1];
+    }
+    return currentCluster._markers[currentCluster._markers.length - 1];
+}
+
 function createClusteredMarkerLayer() {
     return L.markerClusterGroup({
+        animate: false,
         maxClusterRadius: 28,
         showCoverageOnHover: false,
         spiderfyOnMaxZoom: true,
         iconCreateFunction: (cluster) => {
-            const markerIcon = cluster.getAllChildMarkers()[0].options.icon.options;
-            const iconHtml = markerIcon.iconUrl
-                ? `<img src="${markerIcon.iconUrl}" alt="" />`
-                : markerIcon.html;
+            const markerIcon = getRepresentativeClusterMarker(cluster).options.icon.options;
+            const iconHtml = markerIcon.iconUrl ? `<img src="${markerIcon.iconUrl}" alt="" />` : markerIcon.html;
 
             return L.divIcon({
                 className: "map-marker-cluster-icon",
@@ -364,6 +372,7 @@ function TarkovMap() {
     }, [setSavedMapSettings]);
 
     const markerBoundsRef = useRef({});
+    const searchRefreshGenerationRef = useRef(0);
 
     const getViewableHeight = () => {
         const menuHeight = document.querySelector(".navigation")?.offsetHeight || 0;
@@ -463,6 +472,7 @@ function TarkovMap() {
             zoomSnap: 0.1,
             scrollWheelZoom: true,
             wheelPxPerZoomLevel: 120,
+            markerZoomAnimation: false,
             attributionControl: false,
             crs: L.CRS.Simple,
             maxBounds: [
@@ -800,7 +810,7 @@ function TarkovMap() {
         return a;
     };
 
-    const focusOnPoi = (id) => {
+    const focusOnPoi = useCallback((id) => {
         for (const marker of Object.values(mapRef.current._layers)) {
             if (marker.options.id !== id) {
                 continue;
@@ -810,36 +820,48 @@ function TarkovMap() {
             return true;
         }
         return false;
-    };
-
-    const getPoiLinkElement = useCallback((id, imageName) => {
-        const spanEl = L.DomUtil.create("div");
-        spanEl.classList.add("poi-link");
-        spanEl.addEventListener("click", () => {
-            focusOnPoi(id);
-        });
-        const imgEl = L.DomUtil.create("img");
-        imgEl.setAttribute("src", `${process.env.PUBLIC_URL}/maps/interactive/${imageName}.png`);
-        //imgEl.setAttribute('title', id);
-        imgEl.classList.add("poi-image");
-        spanEl.append(imgEl);
-        return spanEl;
     }, []);
+
+    const getPoiLinkElement = useCallback(
+        (id, imageName) => {
+            const spanEl = L.DomUtil.create("div");
+            spanEl.classList.add("poi-link");
+            spanEl.addEventListener("click", () => {
+                focusOnPoi(id);
+            });
+            const imgEl = L.DomUtil.create("img");
+            imgEl.setAttribute("src", `${process.env.PUBLIC_URL}/maps/interactive/${imageName}.png`);
+            //imgEl.setAttribute('title', id);
+            imgEl.classList.add("poi-image");
+            spanEl.append(imgEl);
+            return spanEl;
+        },
+        [focusOnPoi],
+    );
 
     const positionIsInBounds = (position) => {
         const bounds = getBounds(mapRef.current.options.baseData.bounds);
         return bounds.contains(pos(position));
     };
 
-    const refreshMapSearch = () => {
-        const searchBar = mapRef.current?.searchControl?._container.getElementsByClassName(
-            "maps-search-wrapper-search-bar",
-        )[0];
-        if (!searchBar) {
-            return;
-        }
-        searchBar.dispatchEvent(new Event("input"));
-    };
+    const refreshMapSearch = useCallback(() => {
+        const refreshGeneration = ++searchRefreshGenerationRef.current;
+        void whenMarkerInsertionIdle().then(() => {
+            if (refreshGeneration !== searchRefreshGenerationRef.current) {
+                return;
+            }
+            for (const id of focusItem.current) {
+                if (focusOnPoi(id)) {
+                    focusItem.current = [];
+                    break;
+                }
+            }
+            const searchBar = mapRef.current?.searchControl?._container.getElementsByClassName(
+                "maps-search-wrapper-search-bar",
+            )[0];
+            searchBar?.dispatchEvent(new Event("input"));
+        });
+    }, [focusOnPoi]);
 
     // load base layers when map changed
     useEffect(() => {
@@ -1128,7 +1150,7 @@ function TarkovMap() {
 
         // Add labels
         if (mapData.labels?.length > 0) {
-            const labelsGroup = L.layerGroup();
+            const labelsGroup = chunkedLayerGroup();
             const mainLayerVerticalMidpoint =
                 (layerOptions.extents[0].height[1] - layerOptions.extents[0].height[0]) / 2 +
                 layerOptions.extents[0].height[0];
@@ -1171,7 +1193,7 @@ function TarkovMap() {
         // Add static items
         if (showStaticMarkers) {
             for (const category in staticMapMarkers[mapData.normalizedName]) {
-                const markerLayer = L.layerGroup();
+                const markerLayer = chunkedLayerGroup();
 
                 const items = staticMapMarkers[mapData.normalizedName][category];
                 for (const item of items) {
@@ -1200,7 +1222,7 @@ function TarkovMap() {
         }
 
         if (showTestPlayerMarker) {
-            const positionLayer = L.layerGroup();
+            const positionLayer = chunkedLayerGroup();
             const rotation = 45;
             const image = "player-position.png";
             const playerIcon = L.divIcon({
@@ -1390,9 +1412,9 @@ function TarkovMap() {
         //add extracts
         if (mapData.extracts.length > 0) {
             const extractLayers = {
-                pmc: L.layerGroup(),
-                scav: L.layerGroup(),
-                shared: L.layerGroup(),
+                pmc: chunkedLayerGroup(),
+                scav: chunkedLayerGroup(),
+                shared: chunkedLayerGroup(),
             };
             const zIndexOffsets = {
                 pmc: 150,
@@ -1470,12 +1492,12 @@ function TarkovMap() {
                     extractMarker.bindPopup(L.popup().setContent(popup));
                 }
                 extractMarker.on("add", checkMarkerForActiveLayers);
-                L.layerGroup([rect, extractMarker]).addTo(extractLayers[faction]);
+                chunkedLayerGroup([rect, extractMarker]).addTo(extractLayers[faction]);
 
                 checkMarkerBounds(extract.position, markerBounds);
             }
             if (mapData.transits.length > 0) {
-                extractLayers.transit = L.layerGroup();
+                extractLayers.transit = chunkedLayerGroup();
 
                 for (const transit of mapData.transits) {
                     if (!positionIsInBounds(transit.position)) {
@@ -1511,7 +1533,7 @@ function TarkovMap() {
                         transitMarker.bindPopup(L.popup().setContent(popup));
                     }
                     transitMarker.on("add", checkMarkerForActiveLayers);
-                    L.layerGroup([rect, transitMarker]).addTo(extractLayers.transit);
+                    chunkedLayerGroup([rect, transitMarker]).addTo(extractLayers.transit);
 
                     checkMarkerBounds(transit.position, markerBounds);
                 }
@@ -1806,7 +1828,7 @@ function TarkovMap() {
         // maxBounds are bigger than the map and the map center is not in 0,0 so we need to move the view to real center
         // console.log("Center:", L.latLngBounds(bounds).getCenter(true));
         //map.setView(L.latLngBounds(bounds).getCenter(true), undefined, {animate: false});
-    }, [mapData, t, updateSavedMapSettings, addLayer, categories, tMaps, getPoiLinkElement]);
+    }, [mapData, t, updateSavedMapSettings, addLayer, categories, tMaps, getPoiLinkElement, refreshMapSearch]);
 
     // for markers requiring quests
     useEffect(() => {
@@ -1824,8 +1846,8 @@ function TarkovMap() {
             map.layerControl.removeGroupFromMap(groupId);
         }
         //add quest markers
-        const questItems = L.layerGroup();
-        const questObjectives = L.layerGroup();
+        const questItems = chunkedLayerGroup();
+        const questObjectives = chunkedLayerGroup();
         const questSet = new Set();
         const hiddenTasks = mapSettingsRef.current.hiddenTasks ?? [];
         const getMarkerClass = (quest, objective) => {
@@ -1928,7 +1950,7 @@ function TarkovMap() {
                         addElevation(zone, popupContent);
                         zoneMarker.bindPopup(L.popup().setContent(popupContent));
                         zoneMarker.on("add", checkMarkerForActiveLayers);
-                        L.layerGroup([rect, zoneMarker]).addTo(questObjectives);
+                        chunkedLayerGroup([rect, zoneMarker]).addTo(questObjectives);
                     }
                 }
             }
@@ -1940,15 +1962,9 @@ function TarkovMap() {
             addLayer(questObjectives, "quest_objective", "Tasks");
         }
 
-        for (const id of focusItem.current) {
-            if (focusOnPoi(id)) {
-                focusItem.current = [];
-                break;
-            }
-        }
         refreshMapSearch();
         mapRef.current?.searchControl?.setTasks([...questSet].sort((a, b) => a.name.localeCompare(b.name)));
-    }, [mapData, quests, addLayer]);
+    }, [mapData, quests, addLayer, refreshMapSearch]);
 
     // for markers requiring game items
     useEffect(() => {
@@ -2163,14 +2179,8 @@ function TarkovMap() {
             }
         }
 
-        for (const id of focusItem.current) {
-            if (focusOnPoi(id)) {
-                focusItem.current = [];
-                break;
-            }
-        }
         refreshMapSearch();
-    }, [mapData, indexedItemsById, handbookCategoriesById, addLayer, t, tMaps, getPoiLinkElement]);
+    }, [mapData, indexedItemsById, handbookCategoriesById, addLayer, t, tMaps, getPoiLinkElement, refreshMapSearch]);
 
     useEffect(() => {
         if (!mapData || mapData.projection !== "interactive") {
@@ -2187,7 +2197,7 @@ function TarkovMap() {
         // Add player position
         if (playerPosition && (playerPosition.map === mapData.key || playerPosition.map === null)) {
             map._container.classList.add("player-position-shown");
-            const positionLayer = L.layerGroup();
+            const positionLayer = chunkedLayerGroup();
             let addRotation = mapData.coordinateRotation;
             if (addRotation === 90 || addRotation === 270) {
                 addRotation += 180;
@@ -2226,7 +2236,7 @@ function TarkovMap() {
             mapRef.current.panTo(pos(playerPosition.position), { animate: true });
             refreshMapSearch();
         }
-    }, [mapData, playerPosition, addLayer, dispatch, tMaps]);
+    }, [mapData, playerPosition, addLayer, dispatch, tMaps, refreshMapSearch]);
 
     if (!mapData) {
         return <ErrorPage />;

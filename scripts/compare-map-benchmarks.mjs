@@ -29,7 +29,7 @@ function pairedDeltas(base, head) {
     if (base.length !== head.length) {
         throw new Error(`Paired sample counts differ: ${base.length} base, ${head.length} head`);
     }
-    return base.map((baseValue, index) => ((head[index] - baseValue) / baseValue) * 100);
+    return base.map((baseValue, index) => ((head[index] - baseValue) / Math.max(Math.abs(baseValue), 1)) * 100);
 }
 
 function createRandom(seed) {
@@ -95,6 +95,7 @@ const result = JSON.parse(await readFile(options.input, "utf8"));
 const loadValues = (version, key) => result.warmLoads[version].map((sample) => sample[key]);
 const toggleValues = (group, version, action) =>
     result.layerToggles[group][version][action].map((sample) => sample.durationMs);
+const zoomValues = (version, direction, key) => result.zooms[version][direction].map((sample) => sample[key]);
 
 const rows = [
     metricRow("Warm map ready", loadValues("base", "mapReadyMs"), loadValues("head", "mapReadyMs")),
@@ -122,6 +123,33 @@ for (const group of Object.keys(result.layerToggles)) {
     );
 }
 
+for (const direction of ["in", "out"]) {
+    const label = direction === "in" ? "Zoom in" : "Zoom out";
+    rows.push(
+        metricRow(
+            `${label}: max frame gap`,
+            zoomValues("base", direction, "maxFrameGapMs"),
+            zoomValues("head", direction, "maxFrameGapMs"),
+            formatMilliseconds,
+            result.options.zoomBlockSize,
+        ),
+        metricRow(
+            `${label}: long-task time`,
+            zoomValues("base", direction, "longTaskTotalMs"),
+            zoomValues("head", direction, "longTaskTotalMs"),
+            formatMilliseconds,
+            result.options.zoomBlockSize,
+        ),
+        metricRow(
+            `${label}: longest task`,
+            zoomValues("base", direction, "maxLongTaskMs"),
+            zoomValues("head", direction, "maxLongTaskMs"),
+            formatMilliseconds,
+            result.options.zoomBlockSize,
+        ),
+    );
+}
+
 const markdown = `<!-- map-performance-benchmark -->
 ## Streets of Tarkov map benchmark
 
@@ -141,7 +169,9 @@ Changes are classified only when the paired median is at least ${noiseBandPercen
 - Chromium uses ${result.options.cpuThrottle}x CPU throttling at a 1440x1000 viewport
 - ${result.options.iterations} paired warm-load samples after ${result.options.warmups} warmups
 - ${result.options.layerIterations} paired hide/show samples per layer group
+- ${result.options.zoomIterations} paired zoom-in/zoom-out samples, each observed for ${result.options.zoomSampleMs} ms
 - Layer confidence intervals resample block medians so correlated toggles are not treated as independent observations
+- Zoom confidence intervals resample blocks of ${result.options.zoomBlockSize} adjacent samples
 - Map readiness requires marker mutations to settle for ${result.options.settleMs} ms, followed by two animation frames
 - First-load timings remain in the downloadable artifact for diagnostics but are not compared
 - Results are diagnostic and do not fail the PR
