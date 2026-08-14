@@ -9,6 +9,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-fullscreen/dist/Leaflet.fullscreen.js";
 import "leaflet-fullscreen/dist/leaflet.fullscreen.css";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
 import "../../modules/leaflet-control-coordinates.js";
 import "../../modules/leaflet-control-groupedlayer.js";
 import "../../modules/leaflet-control-raid-info.js";
@@ -87,6 +89,31 @@ function applyRotation(latLng, rotation) {
 
 function pos(position) {
     return [position.z, position.x];
+}
+
+function createClusteredMarkerLayer() {
+    return L.markerClusterGroup({
+        maxClusterRadius: 28,
+        showCoverageOnHover: false,
+        spiderfyOnMaxZoom: true,
+        iconCreateFunction: (cluster) => {
+            const markerIcon = cluster.getAllChildMarkers()[0].options.icon.options;
+            const iconHtml = markerIcon.iconUrl
+                ? `<img src="${markerIcon.iconUrl}" alt="" />`
+                : markerIcon.html;
+
+            return L.divIcon({
+                className: "map-marker-cluster-icon",
+                html: `<div class="map-marker-cluster-symbol">${iconHtml}</div><span class="map-marker-cluster-count">${cluster.getChildCount()}</span>`,
+                iconSize: [28, 36],
+                iconAnchor: [14, 13],
+            });
+        },
+    });
+}
+
+function layerHasLayers(layer) {
+    return layer.getLayers().length > 0;
 }
 
 function getScaledBounds(bounds, scaleFactor) {
@@ -483,30 +510,6 @@ function TarkovMap() {
                 );
             }
             updateSavedMapSettings();
-        });
-
-        map.on("overlayremove", (e) => {
-            if (e.group?.key !== "Loose Loot") {
-                return;
-            }
-            for (const id in e.layer._layers) {
-                const marker = e.layer._layers[id];
-                const categories = marker.options.categories;
-                categoryLoop: for (const category of categories) {
-                    if (category === e.layer.key) {
-                        continue;
-                    }
-                    for (const groupLayer of layerControl._layers) {
-                        if (groupLayer.key !== category) {
-                            continue;
-                        }
-                        if (groupLayer.layer._map) {
-                            marker.addTo(map);
-                            break categoryLoop;
-                        }
-                    }
-                }
-            }
         });
 
         map.layerControl = layerControl;
@@ -1244,15 +1247,15 @@ function TarkovMap() {
         // Add spawns
         if (mapData.spawns.length > 0) {
             const spawnLayers = {
-                "pmc": L.layerGroup(),
-                "scav": L.layerGroup(),
-                "sniper_scav": L.layerGroup(),
-                "boss": L.layerGroup(),
-                "cultist-priest": L.layerGroup(),
-                "rogue": L.layerGroup(),
-                "black-div": L.layerGroup(),
-                "af": L.layerGroup(),
-                "bloodhound": L.layerGroup(),
+                "pmc": createClusteredMarkerLayer(),
+                "scav": createClusteredMarkerLayer(),
+                "sniper_scav": createClusteredMarkerLayer(),
+                "boss": createClusteredMarkerLayer(),
+                "cultist-priest": createClusteredMarkerLayer(),
+                "rogue": createClusteredMarkerLayer(),
+                "black-div": createClusteredMarkerLayer(),
+                "af": createClusteredMarkerLayer(),
+                "bloodhound": createClusteredMarkerLayer(),
             };
             for (const spawn of mapData.spawns) {
                 if (!positionIsInBounds(spawn.position)) {
@@ -1365,7 +1368,7 @@ function TarkovMap() {
                 checkMarkerBounds(spawn.position, markerBounds);
             }
             for (const key in spawnLayers) {
-                if (Object.keys(spawnLayers[key]._layers).length > 0) {
+                if (layerHasLayers(spawnLayers[key])) {
                     addLayer(spawnLayers[key], `spawn_${key}`, "Spawns");
                 }
             }
@@ -1501,7 +1504,7 @@ function TarkovMap() {
                 }
             }
             for (const key in extractLayers) {
-                if (Object.keys(extractLayers[key]._layers).length > 0) {
+                if (layerHasLayers(extractLayers[key])) {
                     addLayer(extractLayers[key], `extract_${key}`, "Extracts");
                 }
             }
@@ -1528,7 +1531,7 @@ function TarkovMap() {
                     riseOnHover: true,
                 });
                 if (!containerLayers[containerPosition.lootContainer.normalizedName]) {
-                    containerLayers[containerPosition.lootContainer.normalizedName] = L.layerGroup();
+                    containerLayers[containerPosition.lootContainer.normalizedName] = createClusteredMarkerLayer();
                 }
 
                 const popup = L.DomUtil.create("div");
@@ -1543,7 +1546,7 @@ function TarkovMap() {
                 containerNames[containerPosition.lootContainer.normalizedName] = containerPosition.lootContainer.name;
             }
             for (const key in containerLayers) {
-                if (Object.keys(containerLayers[key]._layers).length > 0) {
+                if (layerHasLayers(containerLayers[key])) {
                     addLayer(containerLayers[key], `container_${key}`, "Lootable Items", containerNames[key]);
                 }
             }
@@ -1551,7 +1554,7 @@ function TarkovMap() {
 
         //add switches
         if (mapData.switches.length > 0) {
-            const switches = L.layerGroup();
+            const switches = createClusteredMarkerLayer();
             for (const sw of mapData.switches) {
                 if (!positionIsInBounds(sw.position)) {
                     continue;
@@ -1625,14 +1628,14 @@ function TarkovMap() {
 
                 checkMarkerBounds(sw.position, markerBoundsRef.current);
             }
-            if (Object.keys(switches._layers).length > 0) {
+            if (layerHasLayers(switches)) {
                 addLayer(switches, "switch", "Usable");
             }
         }
 
         // add stationary weapons
         if (mapData.stationaryWeapons.length > 0) {
-            const stationaryWeapons = L.layerGroup();
+            const stationaryWeapons = createClusteredMarkerLayer();
             for (const weaponPosition of mapData.stationaryWeapons) {
                 if (!positionIsInBounds(weaponPosition.position)) {
                     continue;
@@ -1701,7 +1704,7 @@ function TarkovMap() {
                 hazardMarker.on("click", toggleForceOutline);
                 hazardMarker.on("add", checkMarkerForActiveLayers);
                 if (!hazardLayers[hazard.hazardType]) {
-                    hazardLayers[hazard.hazardType] = L.layerGroup();
+                    hazardLayers[hazard.hazardType] = createClusteredMarkerLayer();
                     hazardNames[hazard.hazardType] = hazard.name;
                 }
                 L.layerGroup([rect, hazardMarker]).addTo(hazardLayers[hazard.hazardType]);
@@ -1748,7 +1751,7 @@ function TarkovMap() {
                     hazardMarker.on("click", toggleForceOutline);
                     hazardMarker.on("add", checkMarkerForActiveLayers);
                     if (!hazardLayers.mortar) {
-                        hazardLayers.mortar = L.layerGroup();
+                        hazardLayers.mortar = createClusteredMarkerLayer();
                         hazardNames.mortar = artyName;
                     }
                     L.layerGroup([rect, hazardMarker]).addTo(hazardLayers.mortar);
@@ -1757,7 +1760,7 @@ function TarkovMap() {
                 }
             }
             for (const key in hazardLayers) {
-                if (Object.keys(hazardLayers[key]._layers).length > 0) {
+                if (layerHasLayers(hazardLayers[key])) {
                     addLayer(hazardLayers[key], `hazard_${key}`, "Hazards", hazardNames[key]);
                 }
             }
@@ -1765,7 +1768,7 @@ function TarkovMap() {
 
         // Add btr stops
         if (mapData.btrStops?.length > 0) {
-            const stopsGroup = L.layerGroup();
+            const stopsGroup = createClusteredMarkerLayer();
             for (const btrStop of mapData.btrStops) {
                 const stopIcon = L.divIcon({
                     className: "btr-stop",
@@ -1939,10 +1942,10 @@ function TarkovMap() {
                 }
             }
         }
-        if (Object.keys(questItems._layers).length > 0) {
+        if (layerHasLayers(questItems)) {
             addLayer(questItems, "quest_item", "Tasks");
         }
-        if (Object.keys(questObjectives._layers).length > 0) {
+        if (layerHasLayers(questObjectives)) {
             addLayer(questObjectives, "quest_objective", "Tasks");
         }
 
@@ -1970,6 +1973,8 @@ function TarkovMap() {
         for (const groupId of groupIds) {
             map.layerControl.removeGroupFromMap(groupId);
         }
+        map.looseLootClusterLayer?.removeFrom(map);
+        map.looseLootClusterLayer = null;
         const layerIds = ["lock"];
         for (const layerId of layerIds) {
             map.layerControl.removeLayerFromMap(layerId);
@@ -1977,7 +1982,7 @@ function TarkovMap() {
 
         //add locks
         if (mapData.locks.length > 0) {
-            const locks = L.layerGroup();
+            const locks = createClusteredMarkerLayer();
             for (const lock of mapData.locks) {
                 const key = indexedItemsById.get(lock.key.id)?.item;
                 if (!key) {
@@ -2032,7 +2037,7 @@ function TarkovMap() {
                 lockMarker.on("click", activateMarkerLayer);
                 lockMarker.addTo(locks);
             }
-            if (Object.keys(locks._layers).length > 0) {
+            if (layerHasLayers(locks)) {
                 addLayer(locks, "lock", "Usable");
             }
         }
@@ -2040,6 +2045,33 @@ function TarkovMap() {
         //add loose loot
         if (mapData.lootLoose.length > 0) {
             const looseLootLayers = {};
+            const looseLootClusterLayer = createClusteredMarkerLayer().addTo(map);
+            const markerCategoryCounts = new Map();
+            map.looseLootClusterLayer = looseLootClusterLayer;
+
+            const addCategoryMarkers = (categoryLayer) => {
+                for (const marker of categoryLayer.clusterMarkers) {
+                    const markerId = L.stamp(marker);
+                    const count = markerCategoryCounts.get(markerId) ?? 0;
+                    markerCategoryCounts.set(markerId, count + 1);
+                    if (count === 0) {
+                        looseLootClusterLayer.addLayer(marker);
+                    }
+                }
+            };
+            const removeCategoryMarkers = (categoryLayer) => {
+                for (const marker of categoryLayer.clusterMarkers) {
+                    const markerId = L.stamp(marker);
+                    const count = markerCategoryCounts.get(markerId) ?? 0;
+                    if (count <= 1) {
+                        markerCategoryCounts.delete(markerId);
+                        looseLootClusterLayer.removeLayer(marker);
+                    } else {
+                        markerCategoryCounts.set(markerId, count - 1);
+                    }
+                }
+            };
+
             for (const looseLoot of mapData.lootLoose) {
                 if (!positionIsInBounds(looseLoot.position)) {
                     continue;
@@ -2118,13 +2150,17 @@ function TarkovMap() {
                     }
                     markerCategories.add(category.id);
                     if (!looseLootLayers[category.normalizedName]) {
+                        const categoryLayer = L.layerGroup([], { category: category.normalizedName });
+                        categoryLayer.clusterMarkers = [];
+                        categoryLayer.on("add", () => addCategoryMarkers(categoryLayer));
+                        categoryLayer.on("remove", () => removeCategoryMarkers(categoryLayer));
                         looseLootLayers[category.normalizedName] = {
-                            layer: L.layerGroup({ category: category.normalizedName }),
+                            layer: categoryLayer,
                             label: category.name,
                             image: category.imageLink,
                         };
                     }
-                    lootMarker.addTo(looseLootLayers[category.normalizedName].layer);
+                    looseLootLayers[category.normalizedName].layer.clusterMarkers.push(lootMarker);
                 }
 
                 addElevation(looseLoot, popup);
